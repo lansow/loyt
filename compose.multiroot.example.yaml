@@ -1,0 +1,45 @@
+# Optional example for mounting several host media folders below /media.
+# Define MOVIES_HOST_PATH and SERIES_HOST_PATH in your local .env file.
+services:
+  api:
+    volumes:
+      - type: bind
+        source: "${MOVIES_HOST_PATH:?Set MOVIES_HOST_PATH in .env}"
+        target: /media/Movies
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${SERIES_HOST_PATH:?Set SERIES_HOST_PATH in .env}"
+        target: /media/Series
+        read_only: true
+        bind:
+          create_host_path: false
+  worker:
+    volumes:
+      - type: bind
+        source: "${MOVIES_HOST_PATH:?Set MOVIES_HOST_PATH in .env}"
+        target: /media/Movies
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${SERIES_HOST_PATH:?Set SERIES_HOST_PATH in .env}"
+        target: /media/Series
+        read_only: true
+        bind:
+          create_host_path: false
+  poster-worker:
+    volumes:
+      - type: bind
+        source: "${MOVIES_HOST_PATH:?Set MOVIES_HOST_PATH in .env}"
+        target: /media/Movies
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${SERIES_HOST_PATH:?Set SERIES_HOST_PATH in .env}"
+        target: /media/Series
+        read_only: true
+        bind:
+          create_host_path: false

@@ -1,0 +1,108 @@
+services:
+  api:
+    build: .
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      MEDIA_ROOT: /media
+      DATA_ROOT: /data
+      APP_DATA_HOST_PATH: ${APP_DATA_PATH:-./data}
+    volumes:
+      - type: bind
+        source: ${MEDIA_HOST_PATH:-./media}
+        target: /media
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${APP_DATA_PATH:-./data}
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HLS_DATA_PATH:-./data/hls}
+        target: /data/hls
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    expose:
+      - "8000"
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      MEDIA_ROOT: /media
+      DATA_ROOT: /data
+    volumes:
+      - type: bind
+        source: ${MEDIA_HOST_PATH:-./media}
+        target: /media
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${APP_DATA_PATH:-./data}
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HLS_DATA_PATH:-./data/hls}
+        target: /data/hls
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    depends_on:
+      - api
+
+  poster-worker:
+    build: .
+    command: ["python", "-m", "app.poster_worker"]
+    environment:
+      MEDIA_ROOT: /media
+      DATA_ROOT: /data
+    volumes:
+      - type: bind
+        source: ${MEDIA_HOST_PATH:-./media}
+        target: /media
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${APP_DATA_PATH:-./data}
+        target: /data
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    depends_on:
+      - api
+
+  web:
+    build:
+      context: .
+      dockerfile: web.Dockerfile
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    volumes:
+      - type: bind
+        source: ${APP_DATA_PATH:-./data}
+        target: /data
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HLS_DATA_PATH:-./data/hls}
+        target: /data/hls
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      - api
+    restart: unless-stopped
+
