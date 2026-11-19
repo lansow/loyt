@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+data/
+media/
+compose.override.yaml
+*.sqlite3*
+*.db
+*.db-shm
+*.db-wal
+*.log
+.DS_Store
+__pycache__/
+*.py[cod]
