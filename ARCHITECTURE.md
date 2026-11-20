@@ -1,118 +1,118 @@
-# معماری لویت
+# Loyt Architecture
 
-این سند رفتار پیاده‌سازی فعلی را توضیح می‌دهد. لویت یک سرویس یکپارچه برای کتابخانهٔ ویدیویی روی شبکهٔ مورد اعتماد است؛ زیرسامانه‌های جداگانهٔ پایگاه داده یا صف لازم ندارد.
+This document describes the current implementation. Loyt is a single application for a video library on a trusted network; it does not require a separate database service or queue system.
 
-## نمای کلی
+## Overview
 
 ```text
-مرورگر
+Browser
   └── Nginx
-        ├── فایل‌های HTML/CSS/JavaScript و فونت محلی
+        ├── HTML, CSS, JavaScript, and local fonts
         └── FastAPI
-              ├── SQLite در /data
-              ├── فایل‌های اصلی زیر /media (فقط خواندنی)
-              ├── Media worker: صف HLS، ffmpeg و ffprobe
-              └── Poster worker: فریم‌های MP4
+              ├── SQLite in /data
+              ├── Original files under /media (read-only)
+              ├── Media worker: HLS queue, FFmpeg, and ffprobe
+              └── Poster worker: MP4 frames
 ```
 
-Compose چهار سرویس دارد:
+Compose defines four services:
 
-| سرویس | مسئولیت |
+| Service | Responsibility |
 | --- | --- |
-| `web` | تحویل رابط و پراکسی API و جریان ویدیو با Nginx |
-| `api` | FastAPI، نشست مدیر، کاتالوگ، پایگاه داده و اعتبارسنجی مسیرها |
-| `worker` | دریافت کارهای صف و ساخت نسخهٔ HLS و پوستر برای ورودی‌های غیر MP4 |
-| `poster-worker` | ساخت تدریجی پوستر برای MP4هایی که مستقیم پخش می‌شوند |
+| `web` | Nginx delivery of the interface, API proxy, and video streams |
+| `api` | FastAPI, administrator sessions, catalog, database, and path validation |
+| `worker` | Claims queued jobs and builds HLS output and posters for non-MP4 inputs |
+| `poster-worker` | Generates posters for MP4 files that play directly |
 
-رابط، HTML/CSS/JavaScript فارسی و راست‌چین است. تصویر وب در زمان build وابستگی‌های ثابت HLS.js و فونت را دریافت می‌کند؛ هنگام اجرا رابط به CDN یا سرویس بیرونی نیاز ندارد. API از FastAPI، Uvicorn، PyYAML و SQLite استاندارد Python استفاده می‌کند. تصویر API، FFmpeg و ffprobe را در خود دارد.
+The interface is Persian and right-to-left, built with HTML, CSS, and JavaScript. The web image downloads pinned HLS.js and font dependencies at build time; the running interface does not require a CDN or external service. The API uses FastAPI, Uvicorn, PyYAML, and Python's standard SQLite module. FFmpeg and ffprobe are included in the API image.
 
-## داده و نگه‌داری
+## Data and persistence
 
-پایگاه دادهٔ SQLite با WAL، کلید خارجی و زمان انتظار قفل استفاده می‌شود. جداول اصلی:
+SQLite uses write-ahead logging (WAL), foreign keys, and a busy timeout. The main tables are:
 
-- `titles`: فیلم یا سریال، توضیح، سال، پوستر و وضعیت نمایش/زباله‌دان.
-- `seasons`: شماره و نام نمایشی فصل، بخش و مسیر YAML تولیدشده.
-- `episodes`: شماره، نام، فایل منبع نسبی به `/media`، مدت، وضعیت پردازش و پوستر.
-- `media_jobs`: وضعیت کار، خطا و زمان‌های صف و پردازش.
+- `titles`: movies or series, description, year, poster, and visibility or trash state.
+- `seasons`: number, display name, order, and path to the generated YAML manifest.
+- `episodes`: number, name, source path relative to `/media`, duration, processing state, and poster.
+- `media_jobs`: job state, error information, and queue and processing timestamps.
 
-فایل‌های ماندگار در `/data` قرار می‌گیرند: `loyt.sqlite3`، پوسترها، YAMLهای ساخته‌شده و فریم‌های پیش‌نمایش زمانی. قطعه‌های HLS در `/data/hls` نگهداری می‌شوند و می‌توانند mount مستقلی داشته باشند. هر دو مسیر داده باید در پشتیبان‌گیری باشند؛ mount رسانه شامل فایل اصلی است و جداگانه مدیریت می‌شود.
+Persistent files live under `/data`: `loyt.sqlite3`, posters, generated YAML manifests, and timeline preview frames. HLS segments live under `/data/hls`, which can use a separate mount. Back up both data locations. The media mount contains the original files and is managed separately.
 
-وضعیت‌های رسانه در پایگاه داده ثبت می‌شوند. کارگر در زمان اجرا کار صف را claim می‌کند، وضعیت را دوره‌ای تازه می‌کند و کارهای رهاشده را دوباره صف می‌گذارد. خطا برای مدیر نگهداری می‌شود تا امکان تلاش دوباره داشته باشد.
+Media states are stored in the database. A worker claims a queued job at runtime, periodically refreshes its status, and re-queues abandoned jobs. Errors are kept for the administrator, who can retry a failed job.
 
-## مسیر افزودن و آماده‌سازی محتوا
+## Content intake and preparation
 
-### فیلم و فایل تک‌قسمتی
+### Movie or single-video title
 
-مدیر عنوان، توضیح اختیاری، سال و مسیر سورس را می‌فرستد. API مسیر را resolve می‌کند، بررسی می‌کند زیر ریشهٔ `/media` باشد، فایل وجود داشته باشد و پسوند پشتیبانی‌شده داشته باشد. این کنترل، عبور از مسیر یا symlink خارج از mount را رد می‌کند.
+The administrator submits a title, optional description and year, and a source path. The API resolves the path and confirms that it remains under `/media`, that the file exists, and that its extension is supported. This rejects traversal and symlinks that resolve outside the mount.
 
-دکمهٔ بررسی سورس با ffprobe وجود جریان ویدیویی، کدک، ابعاد و مدت را بررسی می‌کند و FFmpeg یک تصویر نمونه می‌سازد. هیچ بخشی از فایل اصلی تغییر نمی‌کند.
+The source inspection uses ffprobe to check for a video stream, codec, dimensions, and duration. FFmpeg extracts a sample image. The original file is not modified.
 
-### سریال با YAML
+### Series from YAML
 
-YAML شامل نام سریال، شمارهٔ فصل و فهرست شماره/نام/مسیر قسمت‌هاست. API کل ساختار را اعتبارسنجی می‌کند، مسیرها را نسبت به `/media` بررسی می‌کند و رکوردهای فصل و قسمت را در پایگاه داده می‌سازد. فایل YAML متناظر در پوشهٔ داده تولید می‌شود؛ نوشتن در کتابخانهٔ رسانه لازم نیست.
+The YAML contains a series name, season number, and a list of episode numbers, optional names, and source paths. The API validates the complete structure, checks paths relative to `/media`, and creates the season and episode records in the database. A corresponding YAML file is generated in the application data directory; the media library does not need to be writable.
 
-### واردسازی از پوشه
+### Import from a folder
 
-پنل مدیر پوشه‌های زیر `/media` را فهرست می‌کند. پیش‌نمایش فقط ویدیوهای مجاز را نشان می‌دهد و نام‌های دارای الگوی `SxxEyy` را می‌خواند؛ نام‌های دیگر با مرتب‌سازی طبیعی مرتب می‌شوند. API پس از تأیید، همان مسیرهای منبع را ثبت و YAML فصل را تولید می‌کند. فایل‌ها کپی یا جابه‌جا نمی‌شوند.
+The administrator interface lists folders under `/media`. The preview includes eligible video files and parses names matching `SxxEyy`; other filenames are sorted naturally. After confirmation, the API records the same source paths and generates the season YAML. Files are not copied or moved.
 
-### ابزارهای خط فرمان اختیاری
+### Optional command-line tools
 
-`python -m app.import_library` ابزار واردسازی گروهی است. به‌طور پیش‌فرض زیر `/media` را اسکن می‌کند؛ `IMPORT_ROOTS` می‌تواند فهرستی از زیرپوشه‌های موجود زیر `/media` را با ویرگول جدا کند. حالت پیش‌فرض فقط پیش‌نمایش است؛ `--apply` محتوا را اضافه می‌کند. `--sync` ساختار را با فایل‌های اسکن‌شده همگام می‌کند و رکوردهای منبعی را که دیگر در محدودهٔ اسکن نیستند از پایگاه داده پاک می‌کند. پیش از استفاده از `--sync` از پایگاه داده پشتیبان بگیرید و خروجی پیش‌نمایش را بررسی کنید.
+`python -m app.import_library` performs a bulk import. By default it scans under `/media`; `IMPORT_ROOTS` can provide a comma-separated list of existing subdirectories under `/media`. The default mode is a dry run. `--apply` writes the imported content. `--sync` reconciles the database with scanned files and removes database records for sources no longer in the selected scans. Review the dry-run output and back up the database before using `--sync`.
 
-`python -m app.normalize_library` نیز ابزار اختیاری پاک‌سازی نام‌های نمایشی است. ابتدا فقط برنامهٔ تغییرات را چاپ می‌کند و با `--apply` پایگاه داده و YAMLها را می‌نویسد. هر دو ابزار به mountها و داده‌های همان نصب نیاز دارند و نباید روی یک نمونهٔ زنده بدون پشتیبان اجرا شوند.
+`python -m app.normalize_library` is an optional tool for cleaning up display names. It first prints the planned changes; `--apply` writes the database and YAML files. Both tools require the mounts and data directory for the same installation and should not be run against a live instance without a backup.
 
-## پردازش و پخش
+## Processing and playback
 
-- فایل با پسوند `.mp4` در وضعیت آماده ثبت می‌شود و از همان منبع با HTTP Range پخش می‌شود. `poster-worker` مدت و جریان ویدیو را بررسی می‌کند و فریم پوستر را جداگانه می‌سازد.
-- سایر پسوندهای ویدیویی پشتیبانی‌شده وارد صف می‌شوند. `worker` با ffprobe جریان‌ها را بررسی می‌کند، پوستر می‌سازد و HLS با قطعه‌های fMP4 ایجاد می‌کند.
-- برای ویدیوی H.264 و صدای AAC از کپی جریان استفاده می‌شود. اگر کدک ویدیو با H.264 سازگار نباشد، FFmpeg آن را به H.264 تبدیل می‌کند؛ صدای ناسازگار به AAC تبدیل می‌شود. بنابراین برای بعضی فایل‌ها CPU و کش HLS بیشتری لازم است.
-- فریم پوستر از نقطه‌ای نزدیک به ۱۲٪ مدت ویدیو گرفته می‌شود و در صورت خطا، پردازشگر ابتدای فایل را امتحان می‌کند. پوستر عنوان سریال از یکی از قسمت‌های آماده انتخاب می‌شود.
-- API برای پخش یک توکن امضاشده و زمان‌دار می‌سازد. Nginx فایل MP4 را با Range و بافر غیرفعال تحویل می‌دهد؛ قطعه‌های HLS از مسیر داخلی Nginx خوانده می‌شوند.
-- پلیر از HLS بومی در مرورگرهای سازگار و HLS.js در مرورگرهای دارای MSE استفاده می‌کند. سازگاری نهایی به کدک و مرورگر وابسته است.
-- تصویر پیش‌نمایش نوار زمان در صورت نیاز ساخته و برای استفادهٔ مجدد در پوشهٔ داده cache می‌شود.
+- A file with an `.mp4` extension is recorded as ready and served directly from its source with HTTP Range support. `poster-worker` checks its duration and video stream and generates a poster frame separately.
+- Other supported video extensions enter the job queue. The `worker` inspects streams with ffprobe, creates a poster, and packages HLS with fMP4 segments.
+- H.264 video and AAC audio streams are copied when compatible. If the video codec is not compatible with H.264, FFmpeg transcodes it to H.264; incompatible audio is transcoded to AAC. Some files therefore require more CPU and HLS cache space.
+- The poster frame is taken near 12% of the video's duration. If extraction fails, the worker tries the beginning of the file. A series poster is selected from a ready episode.
+- The API creates a signed, time-limited playback token. Nginx serves MP4 with Range support and buffering disabled; HLS segments are read through an internal Nginx route.
+- The player uses native HLS in compatible browsers and HLS.js in browsers with Media Source Extensions. Final compatibility depends on the codec and browser.
+- Timeline preview frames are generated on demand and cached in the data directory for reuse.
 
-## رابط API
+## API surface
 
-مسیرهای عمومی اصلی:
+Main public routes:
 
-| مسیر | کاربرد |
+| Route | Purpose |
 | --- | --- |
-| `GET /api/health` | سلامت API |
-| `GET /api/catalog` و `GET /api/search` | فهرست و جست‌وجوی محتوا |
-| `GET /api/title/{id}` و `GET /api/episode/{id}` | جزئیات عنوان، قسمت و قسمت بعد |
-| `GET /api/play/{id}` | تولید آدرس پخش زمان‌دار |
-| `GET /api/source/{id}` و `GET /api/stream/{id}/...` | تحویل MP4 یا HLS |
+| `GET /api/health` | API health check |
+| `GET /api/catalog` and `GET /api/search` | Catalog and search |
+| `GET /api/title/{id}` and `GET /api/episode/{id}` | Title details, episode details, and next episode |
+| `GET /api/play/{id}` | Create a time-limited playback URL |
+| `GET /api/source/{id}` and `GET /api/stream/{id}/...` | Deliver MP4 or HLS media |
 
-مسیرهای `/api/admin/...` برای ورود/خروج مدیر، مرور و بررسی سورس، افزودن فیلم و سریال، پیش‌نمایش و ثبت پوشه، ویرایش محتوا، مدیریت وضعیت نمایش و مشاهده/تلاش دوبارهٔ کارها هستند. احراز هویت برای این مسیرها با کوکی نشست مدیر انجام می‌شود.
+The `/api/admin/...` routes support administrator login and logout, source browsing and inspection, adding movies and series, folder preview and import, editing content, managing visibility, and viewing or retrying jobs. These routes require the administrator session cookie.
 
-## امنیت و مرز دسترسی
+## Security boundaries
 
-- `/media` در همهٔ سرویس‌های خواننده mount خواندنی است. `/data` برای API و پردازشگرها نوشتنی است؛ `web` آن را فقط برای تحویل تصویر و HLS می‌خواند.
-- API فقط مسیرهایی را می‌پذیرد که پس از resolve زیر ریشهٔ رسانه بمانند. مسیر نسبی برای منبع در پایگاه داده ذخیره می‌شود.
-- رمز مدیر و کلید امضا فقط از environment خوانده می‌شوند. نشست مدیر با HMAC امضا می‌شود و ۱۲ ساعت اعتبار دارد؛ کوکی `HttpOnly` و `SameSite=Lax` است. `COOKIE_SECURE=1` ویژگی Secure را فعال می‌کند.
-- توکن پخش به شناسهٔ قسمت و زمان انقضا وابسته است و برای خواندن سورس یا قطعه‌ها بررسی می‌شود.
-- API عمومی کاتالوگ نیازمند ورود نیست. این برنامه حساب تماشاگر، سطح دسترسی جداگانه برای هر تماشاگر یا همگام‌سازی پیشرفت بین دستگاه‌ها ندارد؛ پیشرفت در فضای ذخیره‌سازی محلی مرورگر می‌ماند.
-- TLS در خود Compose تنظیم نشده است. دسترسی بیرون شبکهٔ مورد اعتماد باید پشت HTTPS و کنترل دسترسی مناسب قرار گیرد.
+- `/media` is mounted read-only in all services that read source files. `/data` is writable by the API and workers; `web` only reads generated images and HLS output.
+- The API accepts only paths that resolve beneath the media root. Source paths are stored relative to `/media` in the database.
+- The administrator password and signing key are read from environment variables. Administrator sessions are HMAC-signed and valid for 12 hours. The cookie is `HttpOnly` and `SameSite=Lax`; `COOKIE_SECURE=1` enables its Secure attribute.
+- Playback tokens are tied to an episode ID and expiry time, and are checked when serving a source file or segment.
+- The public catalog does not require login. Loyt has no viewer accounts, per-viewer access levels, or cross-device watch progress; progress stays in the browser's local storage.
+- TLS is not configured in Compose. Access outside a trusted network should be placed behind HTTPS and appropriate access controls.
 
-## تنظیمات Compose
+## Compose settings
 
-| متغیر | کاربرد |
+| Variable | Purpose |
 | --- | --- |
-| `MEDIA_HOST_PATH` | مسیر کتابخانهٔ میزبان که در کانتینر به `/media` متصل می‌شود |
-| `APP_DATA_PATH` | پوشهٔ پایدار پایگاه داده و فایل‌های تولیدشده |
-| `HLS_DATA_PATH` | پوشهٔ کش HLS |
-| `WEB_PORT` | پورت منتشرشدهٔ رابط وب |
-| `PUID` و `PGID` | شناسه‌هایی که باید دسترسی خواندن رسانه و نوشتن داده داشته باشند |
-| `ADMIN_PASSWORD` | رمز مدیر؛ حداقل ۱۲ نویسه |
-| `SESSION_SECRET` | کلید نشست؛ حداقل ۳۲ نویسه |
-| `COOKIE_SECURE` | فعال‌سازی کوکی Secure پشت HTTPS |
+| `MEDIA_HOST_PATH` | Host media library mounted inside containers at `/media` |
+| `APP_DATA_PATH` | Persistent directory for the database and generated files |
+| `HLS_DATA_PATH` | HLS cache directory |
+| `WEB_PORT` | Published web interface port |
+| `PUID`, `PGID` | IDs that need media read access and data write access |
+| `ADMIN_PASSWORD` | Administrator password; at least 12 characters |
+| `SESSION_SECRET` | Session signing key; at least 32 characters |
+| `COOKIE_SECURE` | Enables the Secure cookie attribute behind HTTPS |
 
-`compose.yaml` مسیرها را با `create_host_path: false` متصل می‌کند. پوشه‌های میزبان باید از پیش موجود باشند. نمونهٔ چند mount در `compose.multiroot.example.yaml` است. فایل تنظیم محلی `compose.override.yaml` در Git نادیده گرفته می‌شود.
+`compose.yaml` mounts paths with `create_host_path: false`; host directories must exist beforehand. `compose.multiroot.example.yaml` shows an example with multiple media mounts. The local `compose.override.yaml` file is ignored by Git.
 
-## محدودیت‌های فعلی
+## Current limitations
 
-- دسترسی مدیر با یک رمز مشترک است؛ مدیریت کاربر/نقش مجزا وجود ندارد.
-- پیشرفت تماشا محلی هر مرورگر است و بین دستگاه‌ها همگام نمی‌شود.
-- لویت فایل ویدیو را بارگذاری یا حذف نمی‌کند و برای فایل اصلی نسخهٔ پشتیبان نمی‌سازد.
-- قالب‌های غیر MP4 ممکن است به تبدیل و فضای اضافی نیاز داشته باشند؛ زمان پردازش تابع اندازه و کدک فایل و توان CPU است.
-- زیرنویس و انتخاب ترک‌های چندگانهٔ ویدیو/صدا در رابط فعلی مدیریت نمی‌شود.
+- Administrator access uses one shared password; there is no separate user or role management.
+- Watch progress is local to each browser and is not synchronized across devices.
+- Loyt does not upload or delete video files and does not create backups of original media.
+- Non-MP4 formats may need transcoding and extra storage; processing time depends on file size, codecs, and CPU capacity.
+- The current interface does not manage subtitles or selection of multiple video and audio tracks.

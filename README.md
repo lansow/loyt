@@ -1,155 +1,161 @@
-# لویت (Loyt)
+# Loyt
 
-لویت یک کتابخانه و پخش‌کنندهٔ ویدیو با رابط فارسی و راست‌چین است. کاربران شبکه می‌توانند فیلم‌ها و سریال‌های ثبت‌شده را جست‌وجو و تماشا کنند؛ مدیر محتوا را از فایل‌های موجود روی سرور اضافه و مرتب می‌کند. فایل‌های اصلی فقط خوانده می‌شوند و لویت آن‌ها را بارگذاری، جابه‌جا یا حذف نمی‌کند.
+English | [فارسی](README.fa.md)
 
-## امکانات
+Loyt is a Persian, right-to-left video library and player for movies and series. People on the network can browse, search, and play published titles. An administrator adds and organizes content from media files already available to the server. Loyt reads source media without uploading, moving, or deleting it.
 
-- کاتالوگ فیلم و سریال، جست‌وجوی عنوان و قسمت، صفحهٔ جزئیات و نمایش فصل‌ها.
-- افزودن فیلم یا فایل تک‌قسمتی، ثبت فصل از روی YAML، و واردکردن فصل از پوشه با پیش‌نمایش قبل از ثبت.
-- ویرایش عنوان، توضیح، سال، شماره و نام فصل‌ها و قسمت‌ها؛ مخفی‌کردن، بازیابی یا انتقال محتوا به زباله‌دان.
-- صف پردازش رسانه با وضعیت هر کار و امکان تلاش دوباره پس از خطا.
-- پوستر و پیش‌نمایش زمانی که از فریم‌های خود ویدیو ساخته می‌شوند.
-- پخش مستقیم MP4 با پشتیبانی از جابه‌جایی روی نوار زمان؛ پخش HLS برای قالب‌های دیگر.
-- ذخیرهٔ ادامهٔ تماشا در همان مرورگر و دستگاه.
+## Features
 
-## اجزای سامانه
+- Movie and series catalog, title and episode search, title details, and season views.
+- Add movies or single-video titles, create a season from YAML, or preview a folder import before saving it.
+- Edit title, description, year, season and episode names and numbers; hide, restore, or move titles to the trash.
+- Background media job queue with status and retry after errors.
+- Posters and timeline previews generated from video frames.
+- Direct MP4 playback with seeking, and HLS playback for other supported formats.
+- Continue-watching progress saved in the current browser and device.
+
+## Architecture
 
 ```text
-مرورگر
-  └── Nginx: رابط وب، پراکسی API و تحویل امن قطعه‌های پخش
-        └── FastAPI: کاتالوگ، پنل مدیر، اعتبارسنجی و پخش
-              ├── SQLite: محتوا و صف کارها
-              ├── Media worker: آماده‌سازی HLS و پوستر قالب‌های غیر MP4
-              └── Poster worker: ساخت پوستر MP4ها
+Browser
+  └── Nginx: web interface, API proxy, and protected media delivery
+        └── FastAPI: catalog, admin tools, validation, and playback
+              ├── SQLite: catalog and media job queue
+              ├── Media worker: HLS preparation and posters for non-MP4 inputs
+              └── Poster worker: posters for MP4 files
 
-فایل‌های اصلی: /media (فقط خواندنی)
-پایگاه داده و فایل‌های ساخته‌شده: /data
+Original media: /media (read-only)
+Database and generated files: /data
 ```
 
-Compose چهار سرویس `web`، `api`، `worker` و `poster-worker` را اجرا می‌کند. رابط وب با HTML، CSS و JavaScript ساده ساخته شده است. API با FastAPI و SQLite کار می‌کند؛ FFmpeg و ffprobe داخل تصویر سرویس‌های پایتون قرار دارند.
+Docker Compose runs four services: `web`, `api`, `worker`, and `poster-worker`. The web interface uses HTML, CSS, and JavaScript. The API uses FastAPI and SQLite; FFmpeg and ffprobe are included in the Python service image.
 
-## راه‌اندازی با Docker Compose
+## Requirements
 
-پیش‌نیازها: Docker و افزونهٔ Docker Compose. نیازی به نصب FFmpeg روی میزبان نیست.
+- Docker Engine and the Docker Compose plugin.
+- A media directory readable by the configured container user.
+- Persistent writable directories for application data and, optionally, the HLS cache.
 
-۱. نمونهٔ تنظیمات را کپی کنید و پوشه‌های محلی لازم را بسازید:
+FFmpeg does not need to be installed on the host.
 
-```sh
-cp .env.example .env
-mkdir -p ./media ./data ./data/hls
-```
+## Quick start
 
-۲. فایل `.env` را ویرایش کنید. مقدار `MEDIA_HOST_PATH` را روی پوشهٔ رسانهٔ خود بگذارید. برای `ADMIN_PASSWORD` یک رمز طولانی با دست‌کم ۱۲ نویسه تعیین کنید و برای `SESSION_SECRET` یک کلید تصادفی با دست‌کم ۳۲ نویسه بسازید؛ برای نمونه می‌توانید از `openssl rand -hex 32` استفاده کنید. این مقادیر را فقط در `.env` محلی نگه دارید.
+1. Copy the sample settings and create the local directories:
 
-متغیرهای اصلی:
+   ```sh
+   cp .env.example .env
+   mkdir -p ./media ./data ./data/hls
+   ```
 
-| متغیر | کاربرد | مقدار نمونهٔ عمومی |
-| --- | --- | --- |
-| `MEDIA_HOST_PATH` | محل کتابخانهٔ رسانه روی میزبان؛ فقط خواندنی متصل می‌شود | `./media` |
-| `APP_DATA_PATH` | پایگاه داده، پوسترها، پیش‌نمایش‌ها و YAMLهای ساخته‌شده | `./data` |
-| `HLS_DATA_PATH` | فضای کش HLS؛ قابل انتقال به دیسک جدا | `./data/hls` |
-| `WEB_PORT` | پورت وب روی میزبان | `8080` |
-| `PUID` و `PGID` | شناسهٔ کاربری دارای دسترسی خواندن رسانه و نوشتن داده | `1000` |
-| `ADMIN_PASSWORD` | رمز مشترک پنل مدیر؛ باید عوض شود | در `.env.example` جایگزین‌کردنی است |
-| `SESSION_SECRET` | کلید امضای نشست و پیوند پخش؛ باید عوض شود | در `.env.example` جایگزین‌کردنی است |
-| `COOKIE_SECURE` | کوکی امن هنگام استفاده از HTTPS | `0` برای دسترسی مستقیم در شبکهٔ محلی |
+2. Edit `.env`. Set `MEDIA_HOST_PATH` to your media directory. Choose an administrator password of at least 12 characters and a random `SESSION_SECRET` of at least 32 characters. For example, generate a secret with `openssl rand -hex 32`. Keep these values in the local `.env` file.
 
-۳. مطمئن شوید مسیر رسانه و پوشه‌های داده وجود دارند. Compose عمداً آن‌ها را خودکار نمی‌سازد تا یک mount اشتباه به پوشهٔ خالی تبدیل نشود.
+   | Variable | Purpose | Example |
+   | --- | --- | --- |
+   | `MEDIA_HOST_PATH` | Host media library, mounted read-only | `./media` |
+   | `APP_DATA_PATH` | Database, posters, previews, and generated YAML | `./data` |
+   | `HLS_DATA_PATH` | HLS cache; can be moved to a separate disk | `./data/hls` |
+   | `WEB_PORT` | Published web port | `8080` |
+   | `PUID`, `PGID` | User and group IDs for media reads and data writes | `1000` |
+   | `ADMIN_PASSWORD` | Shared administrator password; replace the sample | Set locally |
+   | `SESSION_SECRET` | Signing key for sessions and playback URLs; replace the sample | Set locally |
+   | `COOKIE_SECURE` | Enables the Secure cookie attribute when using HTTPS | `0` for direct local-network access |
 
-۴. سرویس‌ها را بسازید و اجرا کنید:
+3. Confirm that the media and data directories exist. Compose deliberately does not create missing host paths, so a typo will not silently mount an empty directory.
 
-```sh
-docker compose up -d --build
-```
+4. Build and start the services:
 
-۵. در مرورگر به نشانی شبکه‌ای سرور و پورت تنظیم‌شده بروید. مسیر بررسی سلامت API برابر `/api/health` است. پنل مدیر از گزینهٔ «مدیریت» در رابط باز می‌شود.
+   ```sh
+   docker compose up -d --build
+   ```
 
-برای دیدن وضعیت سرویس‌ها:
+5. Open the server address and configured port in a browser. The API health endpoint is `/api/health`. Open the administrator tools from **مدیریت (Manage)** in the interface.
+
+Check service status and logs with:
 
 ```sh
 docker compose ps
 docker compose logs -f api worker poster-worker
 ```
 
-## اتصال فایل‌های رسانه
+## Media mounts
 
-Compose مقدار `MEDIA_HOST_PATH` را به مسیر ثابت `/media` در کانتینرها وصل می‌کند. مدیر همیشه مسیر داخل کانتینر را در فرم وارد می‌کند؛ برای مثال `/media/Movies/example.mp4`. در نتیجه لازم نیست مسیر واقعی میزبان در YAML یا فرم محتوا ثبت شود. برنامه مسیر را resolve می‌کند و فایل‌های بیرون از mount یا symlinkهایی که از آن خارج شوند نمی‌پذیرد.
+Compose mounts `MEDIA_HOST_PATH` at `/media` inside the containers. In administrator forms, use paths inside the container, such as `/media/Movies/example.mp4`; the host's actual directory path does not need to be stored in a title or YAML manifest. The application resolves each path and rejects files outside the mounted media root, including symlinks that resolve outside it.
 
-برای اتصال چند پوشهٔ میزبان، نمونهٔ `compose.multiroot.example.yaml` را می‌توان به Compose اصلی اضافه کرد. مقدارهای `MOVIES_HOST_PATH` و `SERIES_HOST_PATH` را فقط در `.env` محلی تنظیم کنید و سرویس‌ها را با هر دو فایل اجرا کنید:
+To mount multiple host directories, use `compose.multiroot.example.yaml`. Set `MOVIES_HOST_PATH` and `SERIES_HOST_PATH` only in your local `.env` file, then start both Compose files:
 
 ```sh
 docker compose -f compose.yaml -f compose.multiroot.example.yaml up -d --build
 ```
 
-هر پوشه به زیرمسیر متناظر در `/media` متصل می‌شود و برای سرویس‌های API و پردازشگرها در دسترس خواهد بود. مسیر پایهٔ `MEDIA_HOST_PATH` نیز باید وجود داشته باشد. mount رسانه فقط خواندنی است؛ نوشتن در آن لازم نیست.
+Each host directory is mounted under its corresponding location inside `/media`. The base `MEDIA_HOST_PATH` must still exist. Media mounts are read-only; Loyt does not need to write to them.
 
-## افزودن محتوا
+## Adding content
 
-### فیلم یا ویدیوی تک‌قسمتی
+### Movie or single-video title
 
-از پنل مدیریت، «افزودن محتوا» و سپس گزینهٔ فیلم را انتخاب کنید. عنوان، توضیح و سال اختیاری را بنویسید و مسیر فایل را زیر `/media` وارد کنید. دکمهٔ بررسی، وجود فایل، جریان ویدیویی، مدت و مشخصات پایه را می‌سنجد و یک فریم نمونه نشان می‌دهد.
+In the administrator tools, choose **افزودن محتوا (Add content)** and then the movie option. Enter a title, with an optional description and year, and provide a source path under `/media`. The source check verifies that the file exists and contains a video stream, reads its duration and basic properties, and displays a sample frame.
 
-### سریال با YAML
+### Series from YAML
 
-عنوان سریال، فصل و قسمت‌ها را ثبت کنید. شکل کلی فایل YAML چنین است:
+Enter the series title, season, and episodes. A YAML manifest has this general structure:
 
 ```yaml
-series: "نمونهٔ سریال"
+series: "Example Series"
 season: 1
 episodes:
   - number: 1
-    title: "قسمت اول"
+    title: "Episode One"
     source: "/media/Series/example/s01e01.mkv"
   - number: 2
     source: "/media/Series/example/s01e02.mkv"
 ```
 
-نام قسمت اختیاری است. رابط، YAML نهایی را پیش از ثبت نمایش می‌دهد. API کل فهرست را اعتبارسنجی می‌کند و در صورت تکرار شماره، مسیر نامعتبر یا فایل پیدا نشده، فصل را ناقص ثبت نمی‌کند. فایل تولیدشده در پوشهٔ داده نگهداری می‌شود.
+Episode titles are optional. The interface previews the completed YAML before saving. The API validates the full list; duplicate numbers, invalid paths, or missing files prevent a partial season from being saved. Generated manifests are kept in the application data directory.
 
-### افزودن فصل از روی پوشه
+### Import a season from a folder
 
-پوشه‌ای زیر `/media` انتخاب کنید و پیش‌نمایش را ببینید. نام‌هایی مانند `S01E02` شمارهٔ فصل و قسمت را فراهم می‌کنند؛ سایر فایل‌ها با مرتب‌سازی طبیعی نام مرتب می‌شوند. پس از تأیید، لویت فهرست YAML را می‌سازد و مسیر فایل‌های اصلی را ثبت می‌کند؛ چیزی کپی یا جابه‌جا نمی‌شود.
+Choose a directory under `/media` and review the preview. Names such as `S01E02` provide season and episode numbers; other video files are sorted naturally by name. After confirmation, Loyt creates the YAML manifest and records the source paths. It does not copy or move the media files.
 
-پس از افزودن محتوا، وضعیت آماده‌سازی در بخش «کارهای رسانه» دیده می‌شود. اگر پردازش شکست بخورد، خطا در همان بخش نمایش داده می‌شود و مدیر می‌تواند کار را دوباره به صف بفرستد.
+After content is added, preparation status appears in **کارهای رسانه (Media jobs)**. If processing fails, the error is shown there and an administrator can retry the job.
 
-## پخش و فضای ذخیره‌سازی
+## Playback and storage
 
-- فایل‌هایی با پسوند `.mp4` مستقیماً از فایل اصلی و با درخواست‌های HTTP Range پخش می‌شوند. پوستر آن‌ها در پردازش جداگانه ساخته می‌شود.
-- قالب‌های دیگرِ پشتیبانی‌شده با FFmpeg به HLS قطعه‌بندی‌شده تبدیل می‌شوند. اگر ویدیو H.264 و صدا AAC باشد، هر جریان قابل کپی مستقیم است؛ قالب‌های ناسازگار برای پخش مرورگر به H.264 و AAC تبدیل می‌شوند. این تبدیل می‌تواند CPU و فضای قابل‌توجهی مصرف کند.
-- پوستر از فریمی نزدیک به ابتدای ویدیو ساخته می‌شود؛ در صورت شکست استخراج، پردازشگر ابتدای فایل را امتحان می‌کند. تصویر سریال از قسمت آمادهٔ مناسب انتخاب می‌شود.
-- رابط از HLS بومی مرورگرهای سازگار و کتابخانهٔ hls.js در مرورگرهای دارای پشتیبانی MSE استفاده می‌کند. پخش هر فایل به کدک و توانایی دستگاه وابسته است.
-- پیشرفت تماشا در `localStorage` مرورگر ذخیره می‌شود؛ حساب تماشاگر یا همگام‌سازی بین دستگاه‌ها وجود ندارد.
+- Files with an `.mp4` extension play directly from the original source using HTTP Range requests. Their posters are generated by a separate worker.
+- Other supported video formats are packaged as HLS with fMP4 segments. H.264 video and AAC audio streams can be copied when compatible; other streams are transcoded to H.264 and AAC for browser playback. Transcoding can use substantial CPU time and disk space.
+- Posters are generated from a frame near the start of a video, with a fallback attempt at the beginning if extraction fails. A series poster is selected from a suitable processed episode.
+- The player uses native HLS where available and hls.js in browsers that support Media Source Extensions. Playback depends on the device and codecs it supports.
+- Continue-watching progress is stored in browser `localStorage`. There are no viewer accounts or cross-device progress sync.
 
-پوشهٔ داده باید ماندگار و برای شناسهٔ کاربری تنظیم‌شده قابل‌نوشتن باشد. برای پشتیبان‌گیری، سرویس‌ها را متوقف کنید و از `APP_DATA_PATH` و `HLS_DATA_PATH` نسخهٔ پشتیبان بگیرید. فایل‌های اصلی رسانه جدا از داده‌های لویت باقی می‌مانند.
+Keep the data directory persistent and writable by the configured user. For backups, stop the services and back up `APP_DATA_PATH` and `HLS_DATA_PATH`. Original media remains separate from Loyt's generated data.
 
-## حریم خصوصی و امنیت
+## Privacy and security
 
-- `.env`، فایل‌های `compose.override.yaml`، پایگاه داده و پوشه‌های `data` و `media` از Git مستثنا هستند. نمونهٔ تنظیمات فقط مقدارهای عمومی و جایگزین‌شدنی دارد.
-- فهرست عمومی و پخش برای هر کسی که به سرویس دسترسی شبکه‌ای دارد قابل‌مشاهده است؛ فقط عملیات مدیریتی به رمز نیاز دارد. احراز هویت حساب جداگانه برای تماشاگران پیاده‌سازی نشده است.
-- رمز مدیر و کلید نشست در متغیر محیطی می‌مانند. کوکی مدیر `HttpOnly` و `SameSite=Lax` است؛ در استفاده از HTTPS مقدار `COOKIE_SECURE=1` را تنظیم کنید.
-- پیوند پخش با توکن امضاشده و زمان‌دار ساخته می‌شود. مسیر فایل با ریشهٔ رسانه محدود می‌شود و mount آن خواندنی است.
-- این برنامه برای شبکهٔ مورد اعتماد طراحی شده است. پورت آن را بدون HTTPS و لایهٔ دسترسی مناسب در اینترنت عمومی منتشر نکنید.
+- `.env`, `compose.override.yaml`, the database, and local `data` and `media` directories are excluded from Git. The sample environment file contains replaceable example values only.
+- The catalog and playback are available to anyone who can reach the service over the network. Only administrative operations require the shared administrator password. Separate viewer accounts are not implemented.
+- The administrator password and session key are supplied through environment variables. The administrator cookie is `HttpOnly` and `SameSite=Lax`. Set `COOKIE_SECURE=1` when HTTPS is in use.
+- Playback URLs use signed, time-limited tokens. Source paths are restricted to the media root, which is mounted read-only.
+- Loyt is intended for a trusted network. Do not expose it to the public internet without HTTPS and an appropriate access-control layer.
 
-## چیدمان پروژه
+## Project layout
 
 ```text
-app/                         API، ورود محتوا و پردازشگرها
-web/                         رابط فارسی، پخش‌کننده و سبک‌ها
-compose.yaml                 سرویس‌های اصلی Docker
-compose.multiroot.example.yaml نمونهٔ اتصال چند پوشهٔ رسانه
-Dockerfile                   تصویر API و پردازشگرهای رسانه
-web.Dockerfile               تصویر Nginx و رابط وب
-nginx.conf                   مسیریابی API و فایل‌های پخش
-requirements.txt             وابستگی‌های Python
-ARCHITECTURE.md              جزئیات جریان داده، امنیت و محدودیت‌ها
+app/                              API, content import, and media workers
+web/                              Persian interface, player, and styles
+compose.yaml                      Main Docker services
+compose.multiroot.example.yaml    Example for multiple media directories
+Dockerfile                        API and media worker image
+web.Dockerfile                    Nginx and web interface image
+nginx.conf                        API and media delivery routing
+requirements.txt                  Python dependencies
+ARCHITECTURE.md                   Data flow, security, and implementation details
 ```
 
-## عیب‌یابی
+## Troubleshooting
 
-- **سرویس بالا نمی‌آید:** وجود مسیر رسانه، `APP_DATA_PATH` و `HLS_DATA_PATH` و دسترسی خواندن/نوشتن UID/GID را بررسی کنید.
-- **ورود مدیر کار نمی‌کند:** رمز حداقل ۱۲ نویسه و کلید نشست حداقل ۳۲ نویسه باشد؛ مقدارهای نمونهٔ `.env.example` را عوض کنید.
-- **فایل بررسی نمی‌شود:** مسیر را با `/media` شروع کنید، مطمئن شوید فایل در mount خواندنی قرار دارد و کاربر داخل کانتینر اجازهٔ خواندن دارد.
-- **محتوا در انتظار می‌ماند یا خطا دارد:** گزارش `worker` و فضای آزاد HLS را بررسی کنید. برای پخش قالب غیر MP4، زمان و فضای پردازش لازم است.
-- **پخش مرورگر شروع نمی‌شود:** پشتیبانی کدک فایل و مرورگر را بررسی کنید؛ وضعیت پردازش باید آماده باشد.
+- **A service does not start:** Check that media and data paths exist and that the configured UID/GID has the required read and write access.
+- **Administrator login fails:** Use a password of at least 12 characters and a session key of at least 32 characters; replace the sample values from `.env.example`.
+- **A source file cannot be inspected:** Use a path under `/media`, check that the file is in the read-only mount, and confirm that the container user can read it.
+- **A job stays queued or fails:** Check the `worker` logs and available HLS disk space. Non-MP4 formats may require additional processing time and storage.
+- **Playback does not start:** Check that processing is complete and that the browser supports the media codecs.
 
-برای جزئیات ساختار پایگاه داده، API و پردازش فایل، [معماری پروژه](ARCHITECTURE.md) را ببینید.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for details about the database, API, and media processing.
